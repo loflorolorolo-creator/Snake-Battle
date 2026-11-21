@@ -47,7 +47,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add project.godot export_presets.cfg PROJECT_STATUS.txt README_RU.md ANDROID_BUILD_STATUS_RU.md scenes scripts audio .github/workflows/android-debug.yml
+          git add project.godot export_presets.cfg PROJECT_STATUS.txt README_RU.md ANDROID_BUILD_STATUS_RU.md scenes scripts audio
           if git diff --cached --quiet; then
             echo "No extracted changes to commit."
           else
