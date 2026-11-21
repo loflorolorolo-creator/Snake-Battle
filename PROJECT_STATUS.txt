@@ -1,0 +1,4 @@
+Snake Battle — ранний Godot-прототип.
+Исходники обновлены; добавлены Android export preset и CI workflow.
+APK НЕ собран и НЕ проверен. Godot/Android SDK/export templates отсутствуют в текущей среде.
+Подробности: ANDROID_BUILD_STATUS_RU.md
