@@ -1,0 +1,56 @@
+name: Unpack Snake Battle project
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract project files into repository root
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          archive = Path("SnakeBattle_Android_Preparation.zip")
+          if not archive.exists():
+              raise SystemExit("Archive SnakeBattle_Android_Preparation.zip was not found.")
+
+          with ZipFile(archive) as z:
+              members = z.namelist()
+              prefix = "SnakeBattle_Godot/"
+              project_files = [n for n in members if n.startswith(prefix) and not n.endswith("/")]
+              if not project_files:
+                  raise SystemExit("Expected folder SnakeBattle_Godot was not found in the archive.")
+
+              for name in project_files:
+                  relative = Path(name[len(prefix):])
+                  if not relative.parts:
+                      continue
+                  destination = Path(".") / relative
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  destination.write_bytes(z.read(name))
+
+          if not Path("project.godot").exists():
+              raise SystemExit("Extraction finished, but project.godot is missing.")
+          print("Snake Battle project files were extracted successfully.")
+          PY
+
+      - name: Commit extracted project files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add project.godot export_presets.cfg PROJECT_STATUS.txt README_RU.md ANDROID_BUILD_STATUS_RU.md scenes scripts audio .github/workflows/android-debug.yml
+          if git diff --cached --quiet; then
+            echo "No extracted changes to commit."
+          else
+            git commit -m "Extract Snake Battle Godot project"
+            git push
+          fi
