@@ -101,7 +101,8 @@ func _process(delta: float) -> void:
 func _refresh_controls() -> void:
     var viewport_size: Vector2 = get_viewport_rect().size
     joy_origin = Vector2(viewport_size.x * 0.12, viewport_size.y * 0.82)
-    boost_rect = Rect2(viewport_size.x - 145.0, viewport_size.y - 145.0, 125.0, 125.0)
+    # Ускорение — отдельная фиксированная кнопка в правом нижнем углу.
+    boost_rect = Rect2(viewport_size.x - 154.0, viewport_size.y - 154.0, 126.0, 126.0)
 
 func _snake_radius(is_player: bool, index: int, body_size: int, mass_override: float = -1.0) -> float:
     var base_radius: float = 12.5 if is_player else 10.0
@@ -228,9 +229,11 @@ func _input(event: InputEvent) -> void:
             _end_mouse_control()
     elif event is InputEventMouseMotion and not mouse_control_mode.is_empty():
         _move_mouse_control(event.position)
-    elif event is InputEventKey and event.pressed:
+    elif event is InputEventKey:
         if event.keycode == KEY_SPACE:
-            boosting = true
+            boosting = event.pressed
+        elif not event.pressed:
+            return
         elif event.keycode == KEY_ESCAPE:
             if state == "game":
                 state = "pause"
@@ -247,20 +250,35 @@ func _input(event: InputEvent) -> void:
         elif event.keycode == KEY_RIGHT:
             desired_heading = Vector2.RIGHT
 
-func _begin_touch_control(index: int, pos: Vector2) -> void:
+func _pause_button_rect() -> Rect2:
     var viewport_size: Vector2 = get_viewport_rect().size
-    if pos.x > viewport_size.x - 90.0 and pos.y < 90.0:
-        if steer_touch_index == -1 and boost_touch_index == -1:
-            state = "pause"
+    return Rect2(viewport_size.x - 78.0, 12.0, 64.0, 60.0)
+
+func _clear_live_controls() -> void:
+    steer_touch_index = -1
+    boost_touch_index = -1
+    boost_touch_active = false
+    mouse_control_mode = ""
+    joy_vector = Vector2.ZERO
+    boosting = false
+
+func _begin_touch_control(index: int, pos: Vector2) -> void:
+    if _pause_button_rect().has_point(pos):
+        state = "pause"
+        _clear_live_controls()
         return
-    if pos.x < viewport_size.x * 0.5 and steer_touch_index == -1:
+    if state != "game":
+        return
+    if boost_rect.has_point(pos):
+        if boost_touch_index == -1:
+            boost_touch_index = index
+            boost_touch_active = true
+        return
+    # Любое касание вне кнопок может управлять направлением.
+    if steer_touch_index == -1:
         steer_touch_index = index
         steer_touch_start = pos
         joy_vector = Vector2.ZERO
-    elif pos.x >= viewport_size.x * 0.5 and boost_touch_index == -1:
-        boost_touch_index = index
-        boost_touch_active = true
-        boost_touch_pos = pos
 
 func _move_touch_control(index: int, pos: Vector2) -> void:
     if index == steer_touch_index:
@@ -268,9 +286,6 @@ func _move_touch_control(index: int, pos: Vector2) -> void:
         joy_vector = drag_delta.limit_length(105.0) / 105.0
         if joy_vector.length() > 0.12:
             desired_heading = joy_vector.normalized()
-    elif index == boost_touch_index:
-        boost_touch_pos = pos
-        boost_touch_active = true
 
 func _end_touch_control(index: int) -> void:
     if index == steer_touch_index:
@@ -284,22 +299,19 @@ func _begin_mouse_control(pos: Vector2) -> void:
     if state != "game":
         _handle_press(pos)
         return
-    var viewport_size: Vector2 = get_viewport_rect().size
-    if pos.x > viewport_size.x - 90.0 and pos.y < 90.0:
+    if _pause_button_rect().has_point(pos):
         state = "pause"
-    elif pos.x >= viewport_size.x * 0.5:
+        _clear_live_controls()
+    elif boost_rect.has_point(pos):
         mouse_control_mode = "boost"
         boost_touch_active = true
-        boost_touch_pos = pos
     else:
         mouse_control_mode = "steer"
         touch_start = pos
         joy_vector = Vector2.ZERO
 
 func _move_mouse_control(pos: Vector2) -> void:
-    if mouse_control_mode == "boost":
-        boost_touch_pos = pos
-    elif mouse_control_mode == "steer":
+    if mouse_control_mode == "steer":
         var drag_delta: Vector2 = pos - touch_start
         joy_vector = drag_delta.limit_length(105.0) / 105.0
         if joy_vector.length() > 0.12:
@@ -425,12 +437,13 @@ func draw_hud(viewport_size: Vector2) -> void:
     draw_circle(joy_origin, 70.0, Color(0.02, 0.07, 0.1, 0.38))
     draw_circle(joy_origin, 57.0, Color(0.7, 0.95, 0.9, 0.13))
     draw_circle(joy_origin + joy_vector * 48.0, 24.0, Color(0.85, 1.0, 1.0, 0.48))
-    var boost_center: Vector2 = boost_touch_pos if boost_touch_active else boost_rect.get_center()
-    draw_circle(boost_center, BOOST_TOUCH_RADIUS, Color(0.25, 0.08, 0.06, 0.72 if boost_touch_active else 0.42))
-    draw_circle(boost_center, 66.0, Color("#ec874e"))
+    var boost_center: Vector2 = boost_rect.get_center()
+    draw_circle(boost_center, 66.0, Color("#b85c36") if boost_touch_active else Color("#ec874e"))
+    draw_circle(boost_center, 55.0, Color("#f29b5e") if boost_touch_active else Color("#f6ad70"))
     draw_string(ThemeDB.fallback_font, boost_center + Vector2(-47.0, 7.0), "УСКОР", HORIZONTAL_ALIGNMENT_CENTER, 95.0, 20, Color.WHITE)
-    draw_circle(Vector2(viewport_size.x - 48.0, 42.0), 25.0, Color(0.02, 0.07, 0.1, 0.65))
-    draw_string(ThemeDB.fallback_font, Vector2(viewport_size.x - 60.0, 50.0), "Ⅱ", HORIZONTAL_ALIGNMENT_CENTER, 24.0, 20, Color.WHITE)
+    var pause_center: Vector2 = Vector2(viewport_size.x - 46.0, 42.0)
+    draw_circle(pause_center, 25.0, Color(0.02, 0.07, 0.1, 0.78))
+    draw_string(ThemeDB.fallback_font, pause_center + Vector2(-10.0, 8.0), "Ⅱ", HORIZONTAL_ALIGNMENT_CENTER, 20.0, 20, Color.WHITE)
 
 func draw_menu(viewport_size: Vector2) -> void:
     draw_rect(Rect2(Vector2.ZERO, viewport_size), Color("#102b36"))
