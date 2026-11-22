@@ -7,7 +7,9 @@ const SEGMENT_GAP: float = 17.0
 const START_LENGTH: int = 14
 const NORMAL_SPEED: float = 190.0
 const BOOST_SPEED: float = 285.0
-const TURN_RATE: float = 2.7
+const TURN_RATE: float = 3.2
+const SPEED_RESPONSE: float = 5.0
+const CAMERA_RESPONSE: float = 5.5
 const BOOST_DRAIN: float = 34.0
 const STAMINA_REGEN: float = 21.0
 const BOOST_TOUCH_RADIUS: float = 78.0
@@ -24,6 +26,7 @@ var visual_mass: float = 12.0
 var score: int = 0
 var stamina: float = 100.0
 var boosting: bool = false
+var current_speed: float = NORMAL_SPEED
 var pointer_down: bool = false
 var pointer_pos: Vector2 = Vector2.ZERO
 var joy_origin: Vector2 = Vector2.ZERO
@@ -76,12 +79,8 @@ func start_game() -> void:
     visual_mass = 12.0
     score = 0
     stamina = 100.0
-    boosting = false
-    boost_touch_active = false
-    steer_touch_index = -1
-    boost_touch_index = -1
-    mouse_control_mode = ""
-    joy_vector = Vector2.ZERO
+    _clear_controls()
+    current_speed = NORMAL_SPEED
     heading = Vector2.RIGHT
     desired_heading = heading
     snake.clear()
@@ -124,17 +123,24 @@ func update_game(delta: float) -> void:
         var angle: float = heading.angle_to(target)
         heading = heading.rotated(clampf(angle, -TURN_RATE * delta, TURN_RATE * delta)).normalized()
     boosting = (Input.is_key_pressed(KEY_SPACE) or boost_touch_active) and stamina > 0.0
-    var speed: float = BOOST_SPEED if boosting else NORMAL_SPEED
+    var target_speed: float = BOOST_SPEED if boosting else NORMAL_SPEED
+    current_speed = lerpf(current_speed, target_speed, 1.0 - exp(-SPEED_RESPONSE * delta))
     if boosting:
         stamina = maxf(0.0, stamina - BOOST_DRAIN * delta)
     else:
         stamina = minf(100.0, stamina + STAMINA_REGEN * delta)
-    var next_pos: Vector2 = snake[0] + heading * speed * delta
+    var next_pos: Vector2 = snake[0] + heading * current_speed * delta
     if next_pos.x < 45.0 or next_pos.y < 45.0 or next_pos.x > WORLD_SIZE.x - 45.0 or next_pos.y > WORLD_SIZE.y - 45.0:
         heading = heading.rotated(PI * 0.65)
         desired_heading = heading
-        next_pos = snake[0] + heading * speed * delta
+        next_pos = snake[0] + heading * current_speed * delta
     snake.push_front(next_pos)
+    # Keep body spacing stable across different device frame rates.
+    for segment_index in range(1, snake.size()):
+        var segment_delta: Vector2 = snake[segment_index] - snake[segment_index - 1]
+        var segment_distance: float = segment_delta.length()
+        if segment_distance > SEGMENT_GAP and segment_distance > 0.001:
+            snake[segment_index] = snake[segment_index - 1] + segment_delta / segment_distance * SEGMENT_GAP
     # Body contact with the player's own snake is deliberately harmless.
     while snake.size() > START_LENGTH + mass * 2:
         snake.pop_back()
@@ -180,7 +186,7 @@ func update_game(delta: float) -> void:
             if Vector2(foods[i].x, foods[i].y).distance_to(bot_body[0]) < 19.0:
                 foods.remove_at(i)
                 spawn_food()
-    camera_pos = camera_pos.lerp(snake[0], minf(1.0, delta * 5.5))
+    camera_pos = camera_pos.lerp(snake[0], 1.0 - exp(-CAMERA_RESPONSE * delta))
 
 func _drop_bot_food(position: Vector2) -> void:
     for k in range(7):
@@ -205,24 +211,28 @@ func update_bot(bot: Dictionary, delta: float) -> void:
         body.pop_back()
     bot.body = body
 
-func end_game() -> void:
-    state = "dead"
+func _clear_controls() -> void:
     boosting = false
     boost_touch_active = false
     steer_touch_index = -1
     boost_touch_index = -1
     mouse_control_mode = ""
     joy_vector = Vector2.ZERO
+    touch_mode = ""
+
+func end_game() -> void:
+    state = "dead"
+    _clear_controls()
     message = "Змейка погибла — матч завершён"
     message_time = 4.0
 
 func _input(event: InputEvent) -> void:
     if event is InputEventScreenTouch:
         if event.pressed:
-            if state != "game":
-                _handle_press(event.position)
-            else:
+            if state == "game":
                 _begin_touch_control(event.index, event.position)
+            else:
+                _handle_press(event.position)
         else:
             _end_touch_control(event.index)
     elif event is InputEventScreenDrag:
@@ -256,8 +266,8 @@ func _input(event: InputEvent) -> void:
 func _begin_touch_control(index: int, pos: Vector2) -> void:
     var viewport_size: Vector2 = get_viewport_rect().size
     if pos.x > viewport_size.x - 90.0 and pos.y < 90.0:
-        if steer_touch_index == -1 and boost_touch_index == -1:
-            state = "pause"
+        state = "pause"
+        _clear_controls()
         return
     if pos.x < viewport_size.x * 0.5 and steer_touch_index == -1:
         steer_touch_index = index
@@ -293,6 +303,7 @@ func _begin_mouse_control(pos: Vector2) -> void:
     var viewport_size: Vector2 = get_viewport_rect().size
     if pos.x > viewport_size.x - 90.0 and pos.y < 90.0:
         state = "pause"
+        _clear_controls()
     elif pos.x >= viewport_size.x * 0.5:
         mouse_control_mode = "boost"
         boost_touch_active = true
@@ -325,6 +336,7 @@ func _handle_press(_pos: Vector2) -> void:
         state = "menu"
     elif state == "pause":
         state = "game"
+        _clear_controls()
 
 func _draw() -> void:
     var viewport_size: Vector2 = get_viewport_rect().size
@@ -334,7 +346,7 @@ func _draw() -> void:
         draw_world(viewport_size)
         draw_hud(viewport_size)
         if state == "pause":
-            draw_overlay(viewport_size, "ПАУЗА", "Нажми в любом месте, чтобы продолжить")
+            draw_overlay(viewport_size, "ПАУЗА", "Коснись экрана, чтобы продолжить")
         elif state == "dead":
             draw_overlay(viewport_size, "МАТЧ ОКОНЧЕН", "Коснись экрана, чтобы вернуться в меню")
         if message_time > 0.0 and state == "game":
