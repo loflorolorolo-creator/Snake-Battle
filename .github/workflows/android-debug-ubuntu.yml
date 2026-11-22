@@ -1,0 +1,120 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Build APK on Ubuntu
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages required by Godot 4.3
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "cmdline-tools;latest" \
+            "cmake;3.10.2.4988404" \
+            "ndk;23.2.8568313"
+
+      - name: Download Godot 4.3 and standard export templates
+        shell: bash
+        run: |
+          mkdir -p "$HOME/godot" "$HOME/.local/share/godot/export_templates/4.3.stable"
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip -O "$HOME/godot/godot.zip"
+          unzip -q "$HOME/godot/godot.zip" -d "$HOME/godot"
+          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O "$HOME/godot/templates.tpz"
+          unzip -q "$HOME/godot/templates.tpz" -d "$HOME/godot/templates"
+          cp -a "$HOME/godot/templates/templates/." "$HOME/.local/share/godot/export_templates/4.3.stable/"
+          chmod +x "$HOME/godot/Godot_v4.3-stable_linux.x86_64"
+          echo "$HOME/godot" >> "$GITHUB_PATH"
+          test -s "$HOME/.local/share/godot/export_templates/4.3.stable/android_debug.apk"
+          test -s "$HOME/.local/share/godot/export_templates/4.3.stable/android_release.apk"
+
+      - name: Configure Godot Android paths
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF2
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF2
+
+      - name: Verify project and Android toolchain
+        shell: bash
+        run: |
+          test -f project.godot
+          test -f export_presets.cfg
+          test -f scenes/main.tscn
+          test -f scripts/game.gd
+          test -f audio/plains_ambient.wav
+          test -d "$ANDROID_HOME/ndk/23.2.8568313"
+          test -d "$ANDROID_HOME/cmake/3.10.2.4988404"
+
+      - name: Import project
+        run: Godot_v4.3-stable_linux.x86_64 --headless --editor --path . --quit
+
+      - name: Configure preset for prebuilt APK template
+        shell: bash
+        run: |
+          # Use Godot's prebuilt android_debug.apk template; do not invoke Gradle.
+          sed -i 's|^gradle_build/use_gradle_build=.*|gradle_build/use_gradle_build=false|' export_presets.cfg
+          sed -i '/^gradle_build\/min_sdk=/d' export_presets.cfg
+          sed -i '/^gradle_build\/target_sdk=/d' export_presets.cfg
+          echo 'Effective Android export settings:'
+          grep -n 'gradle_build/use_gradle_build' export_presets.cfg
+          if grep -qE '^gradle_build/(min_sdk|target_sdk)=' export_presets.cfg; then
+            echo 'Gradle-only SDK overrides remain in the preset.'
+            exit 1
+          fi
+
+      - name: Export Android debug APK
+        shell: bash
+        run: |
+          mkdir -p build
+          Godot_v4.3-stable_linux.x86_64 --headless --path . --verbose --export-debug "Android" build/SnakeBattle-debug.apk
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          test -s build/SnakeBattle-debug.apk
+          file build/SnakeBattle-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnakeBattle-Android-debug
+          path: build/SnakeBattle-debug.apk
+          if-no-files-found: error
+          retention-days: 14
